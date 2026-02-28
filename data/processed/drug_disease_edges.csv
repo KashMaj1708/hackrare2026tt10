@@ -1,0 +1,3 @@
+relation,drug_index,drug_id,drug_name,disease_index,disease_id,disease_name
+indication,1,DB00001,Ivacaftor,100,MONDO:0009061,Cystic fibrosis
+contraindication,2,DB00203,Sildenafil,101,MONDO:0002182,Pulmonary hypertension

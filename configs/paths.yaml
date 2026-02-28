@@ -1,0 +1,23 @@
+# Paths for dataset pipeline (relative to project root or absolute)
+project_root: "."
+
+data:
+  raw: "data/raw"
+  processed: "data/processed"
+  enriched: "data/enriched"
+  splits: "data/splits"
+
+raw_subdirs:
+  primekg: "primekg"
+  orphanet: "orphanet"
+  clinvar: "clinvar"
+  gnomad: "gnomad"
+  drugbank: "drugbank"
+  sider: "sider"
+  kegg: "kegg"
+  hgnc: "hgnc"
+  mondo: "mondo"
+
+# Optional: NCBI API key for higher rate limits (set in env or here)
+# ncbi_api_key: null
+# ncbi_email: "your_email@example.com"
