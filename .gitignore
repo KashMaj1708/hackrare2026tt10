@@ -27,6 +27,16 @@ data/processed/primekg_with_evidence.csv
 # Large enriched artifacts (regenerate from pipeline)
 data/enriched/enriched_graph.gpickle
 
+# Large datasets (exclude from repo)
+*.csv
+data/
+dis_data/
+
+# Node.js
+node_modules/
+.next/
+out/
+
 # OS
 .DS_Store
 Thumbs.db
