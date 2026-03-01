@@ -151,6 +151,11 @@ def assign_gene_mechanism(variant_labels: list, gnomad_row: dict, omim_inheritan
         mechanism = "unknown"
         confidence = 0.0
 
+    # Phase 3.3 quality filter: only propagate labels meeting BOTH thresholds
+    if confidence < 0.6 or total_labeled < 3:
+        mechanism = "unknown"
+        confidence = 0.0
+
     return mechanism, min(confidence, 1.0), evidence
 
 

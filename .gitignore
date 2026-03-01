@@ -14,11 +14,18 @@ build/
 *.swp
 *.swo
 
-# Data (optional: uncomment to ignore large raw downloads)
-# data/raw/
-# data/processed/
-# data/enriched/
-# data/splits/
+# Large raw source data (too big for GitHub, re-downloadable)
+data/raw/primekg/
+data/raw/orphanet/
+data/raw/drugbank/
+data/raw/sider/
+
+# Large derived/processed files (>100MB, regenerate from pipeline)
+data/processed/primekg_full.csv
+data/processed/primekg_with_evidence.csv
+
+# Large enriched artifacts (regenerate from pipeline)
+data/enriched/enriched_graph.gpickle
 
 # OS
 .DS_Store

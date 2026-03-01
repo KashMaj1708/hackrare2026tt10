@@ -1,5 +1,0 @@
-relation,display_relation,x_index,x_id,x_type,x_name,x_source,y_index,y_id,y_type,y_name,y_source,evidence_type,evidence_score
-indication,indication,1,DB00001,drug,Ivacaftor,DrugBank,100,MONDO:0009061,disease,Cystic fibrosis,MONDO,curated_database,0.75
-contraindication,contraindication,2,DB00203,drug,Sildenafil,DrugBank,101,MONDO:0002182,disease,Pulmonary hypertension,OMIM,curated_database,0.75
-drug_protein,drug_protein,1,DB00001,drug,Ivacaftor,DrugBank,200,1234,gene/protein,CFTR,NCBI,curated_database,0.75
-disease_protein,disease_protein,100,MONDO:0009061,disease,Cystic fibrosis,MONDO,200,1234,gene/protein,CFTR,NCBI,computational,0.25

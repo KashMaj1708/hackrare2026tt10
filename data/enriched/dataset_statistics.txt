@@ -1,0 +1,9 @@
+contraindication_edges_rare: 8314
+enriched_edges: 8100498
+enriched_nodes: 129375
+positive_indication_edges_rare: 3168
+rare_disease_nodes: 3894
+total_disease_nodes: 17080
+total_drug_nodes: 7957
+total_edges: 8100498
+unique_relations: 30

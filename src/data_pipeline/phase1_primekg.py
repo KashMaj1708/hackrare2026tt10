@@ -32,31 +32,30 @@ def load_kg(raw_primekg: Path = None) -> pd.DataFrame:
 
 
 def get_drug_disease_edges(kg: pd.DataFrame) -> pd.DataFrame:
-    """All drug-disease edges (indication, contraindication, off-label use)."""
-    # PrimeKG format: relation, x_*, y_*; either (drug,disease) or (disease,drug)
-    out = []
-    for _, row in kg.iterrows():
-        rel = row.get("relation") or row.get("display_relation")
-        if rel not in DRUG_DISEASE_RELATIONS:
-            continue
-        x_type = str(row.get("x_type", "")).lower()
-        y_type = str(row.get("y_type", "")).lower()
-        if "drug" in x_type and "disease" in y_type:
-            out.append({
-                "relation": rel,
-                "drug_index": row["x_index"], "drug_id": row["x_id"], "drug_name": row["x_name"],
-                "disease_index": row["y_index"], "disease_id": row["y_id"], "disease_name": row["y_name"],
-            })
-        elif "disease" in x_type and "drug" in y_type:
-            out.append({
-                "relation": rel,
-                "drug_index": row["y_index"], "drug_id": row["y_id"], "drug_name": row["y_name"],
-                "disease_index": row["x_index"], "disease_id": row["x_id"], "disease_name": row["x_name"],
-            })
-    return pd.DataFrame(out) if out else pd.DataFrame(columns=[
+    """All drug-disease edges (indication, contraindication, off-label use). Vectorized."""
+    empty = pd.DataFrame(columns=[
         "relation", "drug_index", "drug_id", "drug_name",
         "disease_index", "disease_id", "disease_name"
     ])
+    rel_col = "relation" if "relation" in kg.columns else "display_relation"
+    if rel_col not in kg.columns:
+        return empty
+    rel_mask = kg[rel_col].isin(DRUG_DISEASE_RELATIONS)
+    subset = kg[rel_mask].copy()
+    if subset.empty:
+        return empty
+    x_type_lower = subset["x_type"].astype(str).str.lower()
+    y_type_lower = subset["y_type"].astype(str).str.lower()
+    # Case 1: x=drug, y=disease
+    mask1 = x_type_lower.str.contains("drug", na=False) & y_type_lower.str.contains("disease", na=False)
+    df1 = subset.loc[mask1, [rel_col, "x_index", "x_id", "x_name", "y_index", "y_id", "y_name"]].copy()
+    df1.columns = ["relation", "drug_index", "drug_id", "drug_name", "disease_index", "disease_id", "disease_name"]
+    # Case 2: x=disease, y=drug
+    mask2 = x_type_lower.str.contains("disease", na=False) & y_type_lower.str.contains("drug", na=False)
+    df2 = subset.loc[mask2, [rel_col, "y_index", "y_id", "y_name", "x_index", "x_id", "x_name"]].copy()
+    df2.columns = ["relation", "drug_index", "drug_id", "drug_name", "disease_index", "disease_id", "disease_name"]
+    result = pd.concat([df1, df2], ignore_index=True)
+    return result if len(result) > 0 else empty
 
 
 def get_disease_nodes(kg: pd.DataFrame) -> pd.DataFrame:

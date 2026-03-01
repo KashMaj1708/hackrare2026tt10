@@ -2,6 +2,7 @@
 Phase 6: Merge all layers into enriched graph.
 Build NetworkX graph with node/edge attributes, generate candidate drug-disease pairs.
 """
+import pickle
 from pathlib import Path
 import pandas as pd
 import networkx as nx
@@ -26,92 +27,145 @@ def load_processed_tables(paths):
         ("drug_safety.csv", "drug_safety"),
     ]:
         p = paths.processed / name
-        if p.exists():
-            out[key] = pd.read_csv(p)
+        if p.exists() and p.stat().st_size > 10:
+            try:
+                out[key] = pd.read_csv(p)
+            except Exception:
+                out[key] = None
         else:
             out[key] = None
     return out
 
 
 def build_enriched_graph(tables: dict, kg: pd.DataFrame) -> nx.MultiDiGraph:
-    """Build NetworkX MultiDiGraph with enriched node/edge attributes."""
+    """Build NetworkX MultiDiGraph with enriched node/edge attributes. Optimized with lookup dicts."""
     G = nx.MultiDiGraph()
-    # Nodes: from kg unique (x_index,x_type) and (y_index,y_type)
-    node_rows = []
-    for _, row in kg.iterrows():
-        node_rows.append({"index": row["x_index"], "id": row["x_id"], "type": row["x_type"], "name": row["x_name"]})
-        node_rows.append({"index": row["y_index"], "id": row["y_id"], "type": row["y_type"], "name": row["y_name"]})
-    nodes_df = pd.DataFrame(node_rows).drop_duplicates(subset=["index"])
-    for _, row in nodes_df.iterrows():
-        attrs = {"type": row["type"], "name": row["name"], "id": row["id"]}
-        if tables.get("rare_mask_df") is not None:
-            rm = tables["rare_mask_df"]
-            match = rm[rm["node_id"].astype(str) == str(row["id"])]
-            if not match.empty:
-                attrs["is_rare"] = match.iloc[0].get("is_rare", False)
-        if tables.get("orphanet_map_df") is not None:
-            om = tables["orphanet_map_df"]
-            match = om[om["node_id"].astype(str) == str(row["id"])]
-            if not match.empty:
-                attrs["orphanet_id"] = match.iloc[0].get("orphanet_id")
-        if tables.get("hpo_df") is not None:
-            hp = tables["hpo_df"]
-            match = hp[hp["node_id"].astype(str) == str(row["id"])]
-            if not match.empty:
-                attrs["hpo_annotations"] = list(match[["hpo_id", "frequency"]].itertuples(index=False, name=None))
-        G.add_node(row["index"], **attrs)
-    # Edges
-    for _, row in kg.iterrows():
-        rel = row.get("relation") or row.get("display_relation")
+    print("  Phase 6: building node table...")
+
+    # --- Build unique nodes via vectorized concat ---
+    x_nodes = kg[["x_index", "x_id", "x_type", "x_name"]].copy()
+    x_nodes.columns = ["index", "id", "type", "name"]
+    y_nodes = kg[["y_index", "y_id", "y_type", "y_name"]].copy()
+    y_nodes.columns = ["index", "id", "type", "name"]
+    nodes_df = pd.concat([x_nodes, y_nodes], ignore_index=True).drop_duplicates(subset=["index"])
+
+    # --- Pre-build lookup dicts from enrichment tables (avoid per-row DF filtering) ---
+    rare_lookup = {}
+    if tables.get("rare_mask_df") is not None:
+        rm = tables["rare_mask_df"]
+        rare_lookup = dict(zip(rm["node_id"].astype(str), rm["is_rare"]))
+
+    orphanet_lookup = {}
+    if tables.get("orphanet_map_df") is not None:
+        om = tables["orphanet_map_df"]
+        orphanet_lookup = dict(zip(om["node_id"].astype(str), om["orphanet_id"]))
+
+    hpo_lookup = {}
+    if tables.get("hpo_df") is not None:
+        hp = tables["hpo_df"]
+        for nid, grp in hp.groupby(hp["node_id"].astype(str)):
+            hpo_lookup[nid] = list(grp[["hpo_id", "frequency"]].itertuples(index=False, name=None))
+
+    gene_mech_lookup = {}
+    if tables.get("gene_mechanism") is not None:
+        gm = tables["gene_mechanism"]
+        for _, r in gm.iterrows():
+            gid = str(r.get("gene_id", ""))
+            gene_mech_lookup[gid] = {
+                "mechanism": r.get("mechanism"),
+                "mechanism_confidence": r.get("mechanism_confidence"),
+                "gene_symbol": str(r.get("gene_symbol", "")),
+            }
+
+    drug_action_lookup = {}
+    if tables.get("drug_actions") is not None:
+        da = tables["drug_actions"]
+        for _, r in da.iterrows():
+            key = (str(r.get("drugbank_id", "")), str(r.get("gene_symbol", "")))
+            acts = r.get("actions", "unknown")
+            if isinstance(acts, str):
+                acts = [a.strip() for a in acts.strip("[]").replace("'", "").split(",") if a.strip()]
+            drug_action_lookup[key] = acts[0] if acts else "unknown"
+
+    # --- Add nodes ---
+    print(f"  Phase 6: adding {len(nodes_df)} nodes...")
+    for row in nodes_df.itertuples(index=False):
+        nid = str(row.id)
+        attrs = {"type": row.type, "name": row.name, "id": row.id}
+        if nid in rare_lookup:
+            attrs["is_rare"] = rare_lookup[nid]
+        if nid in orphanet_lookup:
+            attrs["orphanet_id"] = orphanet_lookup[nid]
+        if nid in hpo_lookup:
+            attrs["hpo_annotations"] = hpo_lookup[nid]
+        G.add_node(getattr(row, "index"), **attrs)
+
+    # --- Add edges ---
+    print(f"  Phase 6: adding {len(kg)} edges...")
+    rel_col = "relation" if "relation" in kg.columns else "display_relation"
+    x_types = kg["x_type"].astype(str).values
+    y_types = kg["y_type"].astype(str).values
+    relations = kg[rel_col].values if rel_col in kg.columns else [None] * len(kg)
+    x_indices = kg["x_index"].values
+    y_indices = kg["y_index"].values
+    x_ids = kg["x_id"].astype(str).values
+    y_ids = kg["y_id"].astype(str).values
+
+    for i in range(len(kg)):
+        rel = relations[i]
         attrs = {"relation": rel}
-        if row["x_type"] == "gene/protein" or row["y_type"] == "gene/protein":
-            gene_id = row["y_id"] if row["y_type"] == "gene/protein" else row["x_id"]
-            if tables.get("gene_mechanism") is not None:
-                gm = tables["gene_mechanism"]
-                m = gm[gm["gene_id"].astype(str) == str(gene_id)]
-                if not m.empty:
-                    attrs["mechanism"] = m.iloc[0].get("mechanism")
-                    attrs["mechanism_confidence"] = m.iloc[0].get("mechanism_confidence")
-        if "drug" in str(row["x_type"]).lower() and "gene" in str(row["y_type"]).lower():
-            drug_id = row["x_id"]
-            gene_id = row["y_id"]
-            gene_symbol = str(gene_id)
-            if tables.get("gene_mechanism") is not None:
-                gm = tables["gene_mechanism"]
-                m = gm[gm["gene_id"].astype(str) == str(gene_id)]
-                if not m.empty and m.iloc[0].get("gene_symbol"):
-                    gene_symbol = str(m.iloc[0]["gene_symbol"])
-            if tables.get("drug_actions") is not None:
-                da = tables["drug_actions"]
-                m = da[(da["drugbank_id"].astype(str) == str(drug_id)) & (da["gene_symbol"].astype(str) == gene_symbol)]
-                if not m.empty and m.iloc[0].get("actions"):
-                    acts = m.iloc[0]["actions"]
-                    if isinstance(acts, str):
-                        acts = [a.strip() for a in acts.strip("[]").replace("'", "").split(",")]
-                    attrs["drug_action"] = acts[0] if acts else "unknown"
-        G.add_edge(row["x_index"], row["y_index"], **attrs)
+        xt = x_types[i]
+        yt = y_types[i]
+        # Mechanism enrichment for gene/protein edges
+        if xt == "gene/protein" or yt == "gene/protein":
+            gene_id = y_ids[i] if yt == "gene/protein" else x_ids[i]
+            if gene_id in gene_mech_lookup:
+                m = gene_mech_lookup[gene_id]
+                attrs["mechanism"] = m["mechanism"]
+                attrs["mechanism_confidence"] = m["mechanism_confidence"]
+        # Drug action enrichment for drug->gene edges
+        if "drug" in xt.lower() and "gene" in yt.lower():
+            drug_id = x_ids[i]
+            gene_id = y_ids[i]
+            gene_symbol = gene_mech_lookup.get(gene_id, {}).get("gene_symbol", gene_id)
+            action = drug_action_lookup.get((drug_id, gene_symbol))
+            if action:
+                attrs["drug_action"] = action
+        G.add_edge(x_indices[i], y_indices[i], **attrs)
     return G
 
 
 def get_candidate_pairs(G: nx.MultiDiGraph) -> tuple:
-    """Positive (indication), hard negative (contraindication), and rare disease list."""
-    rare = [n for n, d in G.nodes(data=True) if d.get("is_rare") is True]
-    drugs = [n for n, d in G.nodes(data=True) if "drug" in str(d.get("type", "")).lower()]
+    """Positive (indication), hard negative (contraindication), and rare disease list.
+    Falls back to ALL drug-disease edges when no rare diseases are tagged."""
+    rare_set = {n for n, d in G.nodes(data=True) if d.get("is_rare") is True}
+    drug_set = {n for n, d in G.nodes(data=True) if "drug" in str(d.get("type", "")).lower()}
+    disease_set = {n for n, d in G.nodes(data=True) if "disease" in str(d.get("type", "")).lower()}
+
+    # If no rare diseases found (missing Orphanet data), treat ALL diseases as candidates
+    use_rare_filter = len(rare_set) > 0
+    target_diseases = rare_set if use_rare_filter else disease_set
+    if not use_rare_filter:
+        print("  Phase 6: no rare-disease tags found — using all diseases as candidates")
+
     positives = []
     negatives_hard = []
     for u, v, data in G.edges(data=True):
         rel = data.get("relation")
-        if v not in rare and u not in rare:
+        if rel not in ("indication", "contraindication", "off-label use"):
             continue
-        dis = v if v in rare else u
-        dr = u if u in drugs else v
-        if dr not in drugs:
+        # Determine drug and disease ends
+        if u in drug_set and v in target_diseases:
+            dr, dis = u, v
+        elif v in drug_set and u in target_diseases:
+            dr, dis = v, u
+        else:
             continue
         if rel == "indication":
             positives.append((dr, dis))
         elif rel == "contraindication":
             negatives_hard.append((dr, dis))
-    return positives, negatives_hard, rare, drugs
+    return positives, negatives_hard, list(target_diseases), list(drug_set)
 
 
 def run_phase6(save: bool = True) -> nx.MultiDiGraph:
@@ -125,7 +179,8 @@ def run_phase6(save: bool = True) -> nx.MultiDiGraph:
     positives, negatives_hard, rare, drugs = get_candidate_pairs(G)
     if save:
         paths.enriched.mkdir(parents=True, exist_ok=True)
-        nx.write_gpickle(G, paths.enriched / "enriched_graph.gpickle")
+        with open(paths.enriched / "enriched_graph.gpickle", "wb") as f:
+            pickle.dump(G, f)
         pd.DataFrame(positives, columns=["drug_index", "disease_index"]).to_csv(
             paths.enriched / "candidates_positives.csv", index=False)
         pd.DataFrame(negatives_hard, columns=["drug_index", "disease_index"]).to_csv(

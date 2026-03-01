@@ -1,6 +1,7 @@
 """
 Phase 8: Dataset statistics to report after construction.
 """
+import pickle
 from pathlib import Path
 import pandas as pd
 import networkx as nx
@@ -31,7 +32,8 @@ def run_phase8(save: bool = True) -> dict:
         neg = pd.read_csv(paths.enriched / "candidates_negatives_hard.csv")
         stats["contraindication_edges_rare"] = len(neg)
     if (paths.enriched / "enriched_graph.gpickle").exists():
-        G = nx.read_gpickle(paths.enriched / "enriched_graph.gpickle")
+        with open(paths.enriched / "enriched_graph.gpickle", "rb") as f:
+            G = pickle.load(f)
         stats["enriched_nodes"] = G.number_of_nodes()
         stats["enriched_edges"] = G.number_of_edges()
     if save:
