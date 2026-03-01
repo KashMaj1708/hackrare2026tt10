@@ -28,12 +28,12 @@ Create a folder named `hackrare` in the root of your Google Drive, then upload:
 | File on your computer | Upload destination in Drive |
 |---|---|
 | `data/enriched/training_examples.jsonl` | `My Drive/hackrare/training_examples.jsonl` |
-| `data/enriched/train.csv` | `My Drive/hackrare/train.csv` |
-| `data/enriched/val.csv` | `My Drive/hackrare/val.csv` |
-| `data/enriched/test.csv` | `My Drive/hackrare/test.csv` |
+| `data/splits/train.csv` | `My Drive/hackrare/train.csv` |
+| `data/splits/val.csv` | `My Drive/hackrare/val.csv` |
+| `data/splits/test.csv` | `My Drive/hackrare/test.csv` |
 
-> `training_examples.jsonl` is the **only required file**. The CSV splits are used for
-> a validation loss check at the end of training but are not required to complete training.
+> `training_examples.jsonl` is the **only required file**. The CSV splits are optional
+> and not used during training — they are reference splits only.
 
 The trained LoRA adapter will be saved back to `My Drive/hackrare/llama-hackrare-adapter/`
 automatically by the notebook.
